@@ -74,7 +74,7 @@ gsk_gpu_cached_stroke_hash (gconstpointer data)
   const GskGpuCachedStroke *self = data;
 
   /* We ignore dashes here */
-  return GPOINTER_TO_UINT (self->path) ^
+  return gsk_path_hash (self->path) ^
          ((guint) (self->stroke.line_width * 10)) ^
          (((guint) (self->stroke.miter_limit * 10)) << 4) ^
          (self->stroke.line_cap << 6) ^
@@ -94,7 +94,7 @@ gsk_gpu_cached_stroke_equal (gconstpointer v1,
 
   return stroke1->fx == stroke2->fx &&
          stroke1->fy == stroke2->fy &&
-         stroke1->path == stroke2->path &&
+         gsk_path_translatable (stroke1->path, stroke2->path) &&
          stroke1->sx == stroke2->sx &&
          stroke1->sy == stroke2->sy &&
          gsk_stroke_equal (&stroke1->stroke, &stroke2->stroke);
@@ -208,13 +208,16 @@ gsk_gpu_cached_stroke_lookup (GskGpuCache           *self,
   gsize fx, fy, padding;
   cairo_rectangle_int_t area;
   GskGpuImage *image = NULL;
-  graphene_rect_t viewport;
+  graphene_rect_t path_bounds, viewport;
   size_t subpixel_scale;
+
+  if (!gsk_path_get_stroke_bounds (path, stroke, &path_bounds))
+    return NULL;
 
   determine_scale_and_subpixel_grid (scale, modelview, &sx, &sy, &subpixel_scale);
 
-  fx = mod_subpixel (bounds->origin.x, sx, subpixel_scale, &dx);
-  fy = mod_subpixel (bounds->origin.y, sy, subpixel_scale, &dy);
+  fx = mod_subpixel (bounds->origin.x - path_bounds.origin.x, sx, subpixel_scale, &dx);
+  fy = mod_subpixel (bounds->origin.y - path_bounds.origin.y, sy, subpixel_scale, &dy);
 
   cached = g_hash_table_lookup (priv->stroke_cache,
                                 &(GskGpuCachedStroke) {
@@ -230,16 +233,15 @@ gsk_gpu_cached_stroke_lookup (GskGpuCache           *self,
       gsk_gpu_cached_use ((GskGpuCached *) cached);
 
       graphene_rect_init (out_rect,
-                          cached->image_offset.x - dx,
-                          cached->image_offset.y - dy,
+                          cached->image_offset.x + path_bounds.origin.x - dx,
+                          cached->image_offset.y + path_bounds.origin.y - dy,
                           gsk_gpu_image_get_width (cached->image) / sx,
                           gsk_gpu_image_get_height (cached->image) / sy);
 
       return g_object_ref (cached->image);
     }
 
-  if (!gsk_path_get_stroke_bounds (path, stroke, &viewport) ||
-      !gsk_rect_snap_to_grid_grow (&viewport,
+  if (!gsk_rect_snap_to_grid_grow (&path_bounds,
                                    scale,
                                    &GRAPHENE_POINT_INIT ((float) fx / (sx * subpixel_scale),
                                                          (float) fy / (sy * subpixel_scale)),
@@ -267,8 +269,8 @@ gsk_gpu_cached_stroke_lookup (GskGpuCache           *self,
       cached->fy = fy;
       cached->image = g_object_ref (image);
       graphene_rect_inset (&viewport, padding / -sx, padding / -sy);
-      cached->image_offset = GRAPHENE_POINT_INIT (viewport.origin.x - area.x / sx,
-                                                  viewport.origin.y - area.y / sy);
+      cached->image_offset = GRAPHENE_POINT_INIT (viewport.origin.x - path_bounds.origin.x - area.x / sx,
+                                                  viewport.origin.y - path_bounds.origin.x - area.y / sy);
 
       ((GskGpuCached *) cached)->pixels = area.width * area.height;
 
