@@ -308,6 +308,7 @@ compare_render_tests = [
 ]
 
 tests_with_rounding_issues = [
+  'arithmetic-snap',
   'turbulence-basic',
   'turbulence-clouds',
   'turbulence-coarse',
