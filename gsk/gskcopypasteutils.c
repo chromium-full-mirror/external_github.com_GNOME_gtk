@@ -369,7 +369,12 @@ gsk_render_node_replace_copy_paste (GskRenderNode *node)
   Recording recording = { NULL, NULL };
   GskRenderReplay *replay;
   GskRenderNode *result;
-  
+
+#ifdef GTK_COMPILATION
+  if (!gsk_render_node_contains_copy_paste_node (node))
+    return node;
+#endif
+
   replay = gsk_render_replay_new ();
   gsk_render_replay_set_node_filter (replay,
                                      replace_copy_paste_node_record,
