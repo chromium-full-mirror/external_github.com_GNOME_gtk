@@ -34,7 +34,7 @@ gsk_gpu_cached_glyph_finalize (GskGpuCached *cached)
   g_hash_table_remove (priv->glyph_cache, self);
 
   g_object_unref (self->font);
-  g_object_unref (self->image);
+  g_clear_object (&self->image);
 }
 
 static gboolean
@@ -191,7 +191,21 @@ gsk_gpu_cached_glyph_lookup (GskGpuCache            *self,
   pango_font_get_glyph_extents (scaled_font, glyph, &ink_rect, NULL);
 
   if (ink_rect.width == 0 || ink_rect.height == 0)
-    return NULL;
+    {
+      cache = gsk_gpu_cached_new (self, &GSK_GPU_CACHED_GLYPH_CLASS);
+      cache->font = g_object_ref (font);
+      cache->glyph = glyph;
+      cache->flags = flags;
+      cache->scale = scale;
+      g_hash_table_insert (priv->glyph_cache, cache, cache);
+      gsk_gpu_cached_use ((GskGpuCached *) cache);
+
+      *out_bounds = cache->bounds;
+      *out_origin = cache->origin;
+      g_object_unref (scaled_font);
+
+      return NULL;
+    }
 
   origin.x = floor (ink_rect.x * 1.0 / PANGO_SCALE + subpixel_x);
   origin.y = floor (ink_rect.y * 1.0 / PANGO_SCALE + subpixel_y);
