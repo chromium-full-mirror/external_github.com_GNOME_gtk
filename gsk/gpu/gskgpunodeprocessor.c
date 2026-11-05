@@ -3009,6 +3009,11 @@ gsk_gpu_node_processor_add_glyph_node (GskGpuRenderPass *self,
   const GdkColor *color;
   GdkColorState *acs;
   GdkColor color2;
+  GskGpuImage *cached_image = NULL;
+  graphene_rect_t cached_bounds;
+  graphene_point_t cached_offset;
+  PangoGlyph cached_glyph = 0;
+  GskGpuGlyphLookupFlags cached_flags = 0;
 
   if (gsk_gpu_render_pass_has_opacity (self) &&
       gsk_text_node_has_color_glyphs (node))
@@ -3064,17 +3069,26 @@ gsk_gpu_node_processor_add_glyph_node (GskGpuRenderPass *self,
       glyph_origin.x = glyph_origin.x / align_scale_x - self->offset.x;
       glyph_origin.y = glyph_origin.y / align_scale_y - self->offset.y;
 
-      image = gsk_gpu_cached_glyph_lookup (cache,
-                                           self->frame,
-                                           font,
-                                           glyphs[i].glyph,
-                                           flags,
-                                           scale,
-                                           &glyph_bounds,
-                                           &glyph_offset);
+      if (i == 0 || glyphs[i].glyph != cached_glyph || flags != cached_flags)
+        {
+          cached_image = gsk_gpu_cached_glyph_lookup (cache,
+                                                      self->frame,
+                                                      font,
+                                                      glyphs[i].glyph,
+                                                      flags,
+                                                      scale,
+                                                      &cached_bounds,
+                                                      &cached_offset);
+          cached_glyph = glyphs[i].glyph;
+          cached_flags = flags;
+        }
+
+      image = cached_image;
 
       if (image)
         {
+          glyph_bounds = cached_bounds;
+          glyph_offset = cached_offset;
           glyph_origin.x -= glyph_offset.x / scale;
           glyph_origin.y -= glyph_offset.y / scale;
           glyph_tex_rect = GRAPHENE_RECT_INIT (glyph_origin.x - glyph_bounds.origin.x / scale,
