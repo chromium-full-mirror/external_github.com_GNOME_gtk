@@ -21,6 +21,8 @@
 
 #include "gtkmediastream.h"
 
+#include "gdk/gdkprivate.h"
+
 
 /**
  * GtkMediaStream:
@@ -44,6 +46,8 @@
  * [method@Gtk.MediaStream.error_valist].
  */
 
+#define SEEK_PAUSE_TIMEOUT 250
+
 typedef struct _GtkMediaStreamPrivate GtkMediaStreamPrivate;
 
 struct _GtkMediaStreamPrivate
@@ -52,6 +56,7 @@ struct _GtkMediaStreamPrivate
   gint64 duration;
   GError *error;
   double volume;
+  guint seek_resume_id;
 
   guint has_audio : 1;
   guint has_video : 1;
@@ -256,6 +261,7 @@ gtk_media_stream_dispose (GObject *object)
   GtkMediaStream *self = GTK_MEDIA_STREAM (object);
   GtkMediaStreamPrivate *priv = gtk_media_stream_get_instance_private (self);
 
+  g_clear_handle_id (&priv->seek_resume_id, g_source_remove);
   g_clear_error (&priv->error);
 
   G_OBJECT_CLASS (gtk_media_stream_parent_class)->dispose (object);
@@ -506,8 +512,10 @@ gtk_media_stream_play (GtkMediaStream *self)
   if (priv->error)
     return;
 
-  if (priv->playing)
+  if (priv->playing && priv->seek_resume_id == 0)
     return;
+
+  g_clear_handle_id (&priv->seek_resume_id, g_source_remove);
 
   if (GTK_MEDIA_STREAM_GET_CLASS (self)->play (self))
     {
@@ -547,7 +555,10 @@ gtk_media_stream_pause (GtkMediaStream *self)
   if (!priv->playing)
     return;
 
-  GTK_MEDIA_STREAM_GET_CLASS (self)->pause (self);
+  if (priv->seek_resume_id != 0) /* Already paused for seek, simply don't resume */
+    g_clear_handle_id (&priv->seek_resume_id, g_source_remove);
+  else
+    GTK_MEDIA_STREAM_GET_CLASS (self)->pause (self);
 
   priv->playing = FALSE;
   g_object_notify_by_pspec (G_OBJECT (self), properties[PROP_PLAYING]);
@@ -759,6 +770,20 @@ gtk_media_stream_seek (GtkMediaStream *self,
 
   was_seeking = priv->seeking;
   priv->seeking = TRUE;
+
+  /* Prevent stuttering playback during a seek by briefly pausing */
+  if (priv->playing)
+    {
+      if (priv->seek_resume_id == 0)
+        GTK_MEDIA_STREAM_GET_CLASS (self)->pause (self);
+
+      g_clear_handle_id (&priv->seek_resume_id, g_source_remove);
+      priv->seek_resume_id = g_timeout_add_once (SEEK_PAUSE_TIMEOUT,
+                                                 (GSourceOnceFunc) gtk_media_stream_play,
+                                                 self);
+      gdk_source_set_static_name_by_id (priv->seek_resume_id,
+                                        "[gtk] gtk_media_stream_play");
+    }
 
   GTK_MEDIA_STREAM_GET_CLASS (self)->seek (self, timestamp);
 
